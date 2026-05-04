@@ -2,7 +2,7 @@ var app = {
     version: 2,
     role: 'player',
     socket: io.connect(),
-    jsonFile: '/public/data/FamilyFeud_Questions.json',
+    jsonFile: '/public/data/dawah_family_feud_questions.json',
     currentQ: 0,
     pendingListenPayload: null,
 
@@ -75,6 +75,9 @@ var app = {
         team2: snap.team2,
         boardRound: snap.boardRound,
         wrong: snap.wrong,
+        questionOrder: Array.isArray(snap.questionOrder)
+            ? snap.questionOrder.slice()
+            : [],
     }),
 
     getSnapshot: () =>
@@ -85,7 +88,32 @@ var app = {
             team2: app.team2Score,
             boardRound: app.boardRoundScore,
             wrong: app.wrong,
+            questionOrder: app.questions,
         }),
+
+    mergeQuestionOrderFromSnapshot: (rawSnap) => {
+        var keys = Object.keys(app.allData);
+        if (
+            !rawSnap ||
+            !Array.isArray(rawSnap.questionOrder) ||
+            rawSnap.questionOrder.length === 0
+        ) {
+            if (!app.questions.length) app.questions = keys.slice();
+            return;
+        }
+        var seen = {};
+        var ordered = [];
+        rawSnap.questionOrder.forEach(function (k) {
+            if (app.allData[k] && !seen[k]) {
+                seen[k] = true;
+                ordered.push(k);
+            }
+        });
+        keys.forEach(function (k) {
+            if (!seen[k]) ordered.push(k);
+        });
+        app.questions = ordered;
+    },
 
     normalizeSnapshot: (snap) => {
         if (!snap || typeof snap !== 'object') return null;
@@ -181,7 +209,10 @@ var app = {
     },
 
     applySnapshot: (rawSnap, opts) => {
-        if (!app.allData || !app.questions.length) return;
+        if (!app.allData) return;
+
+        app.mergeQuestionOrderFromSnapshot(rawSnap);
+        if (!app.questions.length) app.questions = Object.keys(app.allData);
 
         var snap = app.normalizeSnapshot(rawSnap);
         if (!snap) return;
@@ -281,8 +312,11 @@ var app = {
 
     emitHost: (payload) => {
         if (app.role !== 'host') return;
+        app.mergeQuestionOrderFromSnapshot(payload.snapshot);
+        if (!app.questions.length) app.questions = Object.keys(app.allData);
         var snap = app.normalizeSnapshot(payload.snapshot);
         if (!snap) return;
+        snap.questionOrder = app.questions.slice();
         app.socket.emit(
             'talking',
             Object.assign({}, payload, { snapshot: snap })

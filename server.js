@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const httpApp = express();
@@ -7,7 +8,33 @@ const port = Number(process.env.PORT) || 8080;
 
 const SLOT_COUNT = 10;
 
-function defaultSnapshot() {
+const questionsFile =
+    process.env.QUESTIONS_JSON || 'dawah_family_feud_questions.json';
+const questionsPath = path.join(__dirname, 'public/data', questionsFile);
+
+function shuffleArray(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = a[i];
+        a[i] = a[j];
+        a[j] = t;
+    }
+    return a;
+}
+
+function loadQuestionKeysOrderedRandom() {
+    try {
+        var raw = fs.readFileSync(questionsPath, 'utf8');
+        var data = JSON.parse(raw);
+        return shuffleArray(Object.keys(data));
+    } catch (err) {
+        console.error('Could not load questions for shuffle:', questionsPath, err);
+        return [];
+    }
+}
+
+function defaultSnapshot(questionOrder) {
     return {
         questionIndex: 0,
         flipped: Array(SLOT_COUNT).fill(false),
@@ -15,6 +42,7 @@ function defaultSnapshot() {
         team2: 0,
         boardRound: 0,
         wrong: 0,
+        questionOrder: questionOrder.slice(),
     };
 }
 
@@ -26,14 +54,24 @@ function cloneSnapshot(s) {
         team2: s.team2,
         boardRound: s.boardRound,
         wrong: s.wrong,
+        questionOrder: Array.isArray(s.questionOrder)
+            ? s.questionOrder.slice()
+            : [],
     };
 }
 
-let gameSnapshot = defaultSnapshot();
+var initialQuestionOrder = loadQuestionKeysOrderedRandom();
+let gameSnapshot = defaultSnapshot(initialQuestionOrder);
 let hostSocketId = null;
 
 server.listen(port);
 console.log('Listening on ' + port);
+console.log(
+    'Question deck order randomized (' +
+        gameSnapshot.questionOrder.length +
+        ' questions):',
+    questionsFile
+);
 
 const publicDir = path.join(__dirname, 'public');
 httpApp.use('/public', express.static(publicDir));
@@ -57,7 +95,14 @@ io.sockets.on('connection', (socket) => {
         }
 
         if (data.snapshot) {
-            gameSnapshot = cloneSnapshot(data.snapshot);
+            var merged = cloneSnapshot(data.snapshot);
+            if (
+                !merged.questionOrder.length &&
+                gameSnapshot.questionOrder.length
+            ) {
+                merged.questionOrder = gameSnapshot.questionOrder.slice();
+            }
+            gameSnapshot = merged;
         }
 
         io.sockets.emit('listening', data);

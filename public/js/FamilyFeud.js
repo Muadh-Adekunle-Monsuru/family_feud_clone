@@ -1,12 +1,19 @@
-console.clear()
-
 var app = {
-    version: 1,
-    role: "player",
+    version: 2,
+    role: 'player',
     socket: io.connect(),
-    jsonFile: "../public/data/FamilyFeud_Questions.json",
+    jsonFile: '/public/data/FamilyFeud_Questions.json',
     currentQ: 0,
-    wrong:0,
+    pendingListenPayload: null,
+
+    SLOT_COUNT: 10,
+
+    team1Score: 0,
+    team2Score: 0,
+    boardRoundScore: 0,
+    wrong: 0,
+    flippedState: [],
+
     board: $(`<div class='gameBoard'>
 
                 <!--- Scores --->
@@ -46,8 +53,7 @@ var app = {
                 </div>
 
                 </div>`),
-    
-    // Utility functions
+
     shuffle: (array) => {
         var currentIndex = array.length,
             temporaryValue, randomIndex;
@@ -61,37 +67,191 @@ var app = {
         }
         return array;
     },
+
+    cloneSnapshot: (snap) => ({
+        questionIndex: snap.questionIndex,
+        flipped: snap.flipped.slice(),
+        team1: snap.team1,
+        team2: snap.team2,
+        boardRound: snap.boardRound,
+        wrong: snap.wrong,
+    }),
+
+    getSnapshot: () =>
+        app.cloneSnapshot({
+            questionIndex: app.currentQ,
+            flipped: app.flippedState,
+            team1: app.team1Score,
+            team2: app.team2Score,
+            boardRound: app.boardRoundScore,
+            wrong: app.wrong,
+        }),
+
+    normalizeSnapshot: (snap) => {
+        if (!snap || typeof snap !== 'object') return null;
+        var maxQ = app.questions.length - 1;
+        var q = snap.questionIndex;
+        if (typeof q !== 'number' || isNaN(q)) q = 0;
+        q = Math.max(0, Math.min(q, maxQ));
+
+        var flipped = Array.isArray(snap.flipped)
+            ? snap.flipped.slice(0, app.SLOT_COUNT)
+            : [];
+        while (flipped.length < app.SLOT_COUNT) flipped.push(false);
+
+        return {
+            questionIndex: q,
+            flipped: flipped,
+            team1: Number(snap.team1) || 0,
+            team2: Number(snap.team2) || 0,
+            boardRound: Number(snap.boardRound) || 0,
+            wrong: Math.max(0, Number(snap.wrong) || 0),
+        };
+    },
+
+    computeBoardRound: (questionIndex, flipped) => {
+        var qText = app.questions[questionIndex];
+        if (!qText || !app.allData[qText]) return 0;
+        var qAnswr = app.allData[qText];
+        var sum = 0;
+        for (var i = 0; i < app.SLOT_COUNT; i++) {
+            if (flipped[i] && qAnswr[i]) {
+                sum += parseInt(qAnswr[i][1], 10) || 0;
+            }
+        }
+        return sum;
+    },
+
+    syncScoreDOM: () => {
+        app.board.find('#boardScore').html(app.boardRoundScore);
+        app.board.find('#team1').html(app.team1Score);
+        app.board.find('#team2').html(app.team2Score);
+    },
+
+    syncWrongVisual: () => {
+        var wrongEl = app.board.find('.wrongBoard');
+        var imgs = wrongEl.find('img');
+        imgs.hide();
+        var w = app.wrong;
+        for (var k = 1; k <= w && k <= 3; k++) {
+            imgs.eq(k - 1).show();
+        }
+        wrongEl.toggle(w > 0);
+    },
+
+    prepareCardTransforms: () => {
+        var cardHolders = app.board.find('.cardHolder');
+        var cards = app.board.find('.card');
+        var backs = app.board.find('.back');
+        var cardSides = app.board.find('.card>div');
+
+        TweenLite.set(cardHolders, { perspective: 800 });
+        TweenLite.set(cards, { transformStyle: 'preserve-3d' });
+        TweenLite.set(backs, { rotationX: 180 });
+        TweenLite.set(cardSides, { backfaceVisibility: 'hidden' });
+    },
+
+    syncSingleCard: (index, flipped, animate) => {
+        var card = app.board.find('.card[data-id="' + index + '"]');
+        if (!card.length) return;
+
+        TweenLite.killTweensOf(card);
+        var rotationX = flipped ? -180 : 0;
+        if (animate) {
+            TweenLite.to(card, 0.35, {
+                rotationX: rotationX,
+                ease: Back.easeOut,
+            });
+        } else {
+            TweenLite.set(card, { rotationX: rotationX });
+        }
+        card.data('flipped', flipped);
+    },
+
+    syncAllCards: (prevFlipped, animate) => {
+        var animateCards = !!animate;
+        for (var i = 0; i < app.SLOT_COUNT; i++) {
+            var target = app.flippedState[i];
+            var changed =
+                !prevFlipped ||
+                prevFlipped.length < app.SLOT_COUNT ||
+                prevFlipped[i] !== target;
+            app.syncSingleCard(i, target, animateCards && changed);
+        }
+    },
+
+    applySnapshot: (rawSnap, opts) => {
+        if (!app.allData || !app.questions.length) return;
+
+        var snap = app.normalizeSnapshot(rawSnap);
+        if (!snap) return;
+
+        var o = opts || {};
+        var animateCards = !!o.animateCards;
+
+        var prevQ = app.currentQ;
+        var prevFlipped = app.flippedState.slice();
+
+        app.currentQ = snap.questionIndex;
+        app.team1Score = snap.team1;
+        app.team2Score = snap.team2;
+        app.boardRoundScore = snap.boardRound;
+        app.wrong = snap.wrong;
+        app.flippedState = snap.flipped.slice();
+
+        if (prevQ !== app.currentQ) {
+            app.makeQuestion(app.currentQ);
+            app.prepareCardTransforms();
+            app.syncAllCards(null, false);
+        } else {
+            app.syncAllCards(prevFlipped, animateCards);
+        }
+
+        app.syncScoreDOM();
+        app.syncWrongVisual();
+    },
+
     jsonLoaded: (data) => {
         app.allData = data;
         app.questions = Object.keys(data);
-        app.makeQuestion(app.currentQ);
-        app.board.find('.host').hide();
+
+        app.team1Score = 0;
+        app.team2Score = 0;
+        app.boardRoundScore = 0;
+        app.wrong = 0;
+        app.flippedState = Array(app.SLOT_COUNT).fill(false);
+        app.currentQ = 0;
+
+        app.makeQuestion(0);
         $('body').append(app.board);
+
+        if (app.pendingListenPayload) {
+            app.listenSocket(app.pendingListenPayload);
+            app.pendingListenPayload = null;
+        } else {
+            app.syncScoreDOM();
+            app.syncWrongVisual();
+            app.syncAllCards(null, false);
+        }
     },
 
-    // Action functions
     makeQuestion: (eNum) => {
+        app.currentQ = eNum;
+
         var qText = app.questions[eNum];
         var qAnswr = app.allData[qText];
 
         var qNum = qAnswr.length;
-        qNum = (qNum < 8) ? 8 : qNum;
-        qNum = (qNum % 2 != 0) ? qNum + 1 : qNum;
+        qNum = qNum < 8 ? 8 : qNum;
+        qNum = qNum % 2 !== 0 ? qNum + 1 : qNum;
 
-        var boardScore = app.board.find("#boardScore");
-        var question = app.board.find(".question");
-        var holderMain = app.board.find(".colHolder");
+        var question = app.board.find('.question');
+        var holderMain = app.board.find('.colHolder');
 
-        boardScore.html(0);
         question.html(qText.replace(/&x22;/gi, '"'));
         holderMain.empty();
 
-        app.wrong = 0;
-        var wrong = app.board.find(".wrongBoard")
-        $(wrong).find("img").hide()
-        $(wrong).hide()
-
-        qNum = 10
+        qNum = app.SLOT_COUNT;
 
         for (var i = 0; i < qNum; i++) {
             var aLI;
@@ -99,7 +259,7 @@ var app = {
                 aLI = $(`<div class='cardHolder'>
                             <div class='card' data-id='${i}'>
                                 <div class='front'>
-                                    <span class='DBG'>${(i + 1)}</span>
+                                    <span class='DBG'>${i + 1}</span>
                                     <span class='answer'>${qAnswr[i][0]}</span>
                                 </div>
                                 <div class='back DBG'>
@@ -107,165 +267,106 @@ var app = {
                                     <b class='LBG'>${qAnswr[i][1]}</b>
                                 </div>
                             </div>
-                        </div>`)
+                        </div>`);
             } else {
-                aLI = $(`<div class='cardHolder empty'><div></div></div>`)
+                aLI = $(`<div class='cardHolder empty'><div></div></div>`);
             }
 
-            var parentDiv = holderMain//(i < (qNum / 2)) ? col1 : col2;
-            aLI.on('click', {
-                trigger: 'flipCard',
-                num: i
-            }, app.talkSocket);
-            $(aLI).appendTo(parentDiv)
+            aLI.on('click', { num: i }, app.onCardClicked);
+            $(aLI).appendTo(holderMain);
         }
 
-        var cardHolders = app.board.find('.cardHolder');
-        var cards = app.board.find('.card');
-        var backs = app.board.find('.back');
-        var cardSides = app.board.find('.card>div');
+        app.prepareCardTransforms();
+    },
 
-        TweenLite.set(cardHolders, {
-            perspective: 800
-        });
-        TweenLite.set(cards, {
-            transformStyle: "preserve-3d"
-        });
-        TweenLite.set(backs, {
-            rotationX: 180
-        });
-        TweenLite.set(cardSides, {
-            backfaceVisibility: "hidden"
-        });
-        cards.data("flipped", false);
+    emitHost: (payload) => {
+        if (app.role !== 'host') return;
+        var snap = app.normalizeSnapshot(payload.snapshot);
+        if (!snap) return;
+        app.socket.emit(
+            'talking',
+            Object.assign({}, payload, { snapshot: snap })
+        );
     },
-    getBoardScore: () => {
-        var cards = app.board.find('.card');
-        var boardScore = app.board.find('#boardScore');
-        var currentScore = {
-            var: boardScore.html()
-        };
-        var score = 0;
 
-        function tallyScore() {
-            if ($(this).data("flipped")) {
-                var value = $(this).find("b").html();
-                score += parseInt(value)
-            }
-        }
-        $.each(cards, tallyScore);
-        TweenMax.to(currentScore, 1, {
-            var: score,
-            onUpdate: function () {
-                boardScore.html(Math.round(currentScore.var));
-            },
-            ease: Power3.easeOut
-        });
-    },
-    awardPoints: (num) => {
-        var boardScore = app.board.find('#boardScore');
-        var currentScore = {
-            var: parseInt(boardScore.html())
-        };
-        var team = app.board.find("#team" + num);
-        var teamScore = {
-            var: parseInt(team.html())
-        };
-        var teamScoreUpdated = (teamScore.var + currentScore.var);
-        TweenMax.to(teamScore, 1, {
-            var: teamScoreUpdated,
-            onUpdate: function () {
-                team.html(Math.round(teamScore.var));
-            },
-            ease: Power3.easeOut
-        });
+    onCardClicked: (e) => {
+        if (app.role !== 'host') return;
+        var num = e.data.num;
 
-        TweenMax.to(currentScore, 1, {
-            var: 0,
-            onUpdate: function () {
-                boardScore.html(Math.round(currentScore.var));
-            },
-            ease: Power3.easeOut
+        var snap = app.getSnapshot();
+        snap.flipped[num] = !snap.flipped[num];
+        snap.boardRound = app.computeBoardRound(snap.questionIndex, snap.flipped);
+
+        app.emitHost({
+            trigger: 'flipCard',
+            num: num,
+            snapshot: snap,
         });
     },
-    changeQuestion: () => {
-        app.currentQ++;
-        app.makeQuestion(app.currentQ);
-    },
+
     makeHost: () => {
-        app.role = "host";
-        app.board.find(".hide").removeClass('hide');
+        app.role = 'host';
+        app.board.find('.hide').removeClass('hide');
         app.board.addClass('showHost');
-        app.socket.emit("talking", {
-            trigger: 'hostAssigned'
+        app.emitHost({
+            trigger: 'hostAssigned',
+            snapshot: app.getSnapshot(),
         });
     },
-    flipCard: (n) => {
-        console.log("card");
-        console.log(n);
-        var card = $('[data-id="' + n + '"]');
-        var flipped = $(card).data("flipped");
-        var cardRotate = (flipped) ? 0 : -180;
-        TweenLite.to(card, 1, {
-            rotationX: cardRotate,
-            ease: Back.easeOut
-        });
-        flipped = !flipped;
-        $(card).data("flipped", flipped);
-        app.getBoardScore()
-    },
-    wrongAnswer:()=>{
-        app.wrong++
-        console.log("wrong: "+ app.wrong )
-        var wrong = app.board.find(".wrongBoard")
-        $(wrong).find("img:nth-child("+app.wrong+")").show()
-        $(wrong).show()
-        setTimeout(() => { 
-            $(wrong).hide(); 
-        }, 1000); 
 
-    },
-
-    // Socket Test
-    talkSocket: (e) => {
-        if (app.role == "host") app.socket.emit("talking", e.data);
-    },
     listenSocket: (data) => {
-        console.log(data);
-        switch (data.trigger) {
-            case "newQuestion":
-                app.changeQuestion();
-                break;
-            case "awardTeam1":
-                app.awardPoints(1);
-                break;
-            case "awardTeam2":
-                app.awardPoints(2);
-                break;
-            case "flipCard":
-                app.flipCard(data.num);
-                break;
-            case "hostAssigned":
-                app.board.find('#hostBTN').remove();
-                break;
-            case "wrong":
-                app.wrongAnswer()
-                break;
-        }
-    },
-    
-    // Inital function
-    init: () => {
+        if (!data || !data.snapshot) return;
 
+        if (!app.allData) {
+            app.pendingListenPayload = data;
+            return;
+        }
+
+        if (data.trigger === 'hostAssigned') {
+            app.board.find('#hostBTN').remove();
+        }
+
+        var animateCards = data.trigger === 'flipCard';
+        app.applySnapshot(data.snapshot, { animateCards: animateCards });
+    },
+
+    init: () => {
         $.getJSON(app.jsonFile, app.jsonLoaded);
 
-        app.board.find('#hostBTN'    ).on('click', app.makeHost);
-        app.board.find('#awardTeam1' ).on('click', { trigger: 'awardTeam1' }, app.talkSocket);
-        app.board.find('#awardTeam2' ).on('click', { trigger: 'awardTeam2' }, app.talkSocket);
-        app.board.find('#newQuestion').on('click', { trigger: 'newQuestion'}, app.talkSocket);
-        app.board.find('#wrong'      ).on('click', { trigger: 'wrong'      }, app.talkSocket);
+        app.board.find('#hostBTN').on('click', app.makeHost);
 
-        app.socket.on('listening', app.listenSocket)
-    }
+        app.board.find('#awardTeam1').on('click', () => {
+            var snap = app.getSnapshot();
+            snap.team1 += snap.boardRound;
+            snap.boardRound = 0;
+            app.emitHost({ trigger: 'awardTeam1', snapshot: snap });
+        });
+
+        app.board.find('#awardTeam2').on('click', () => {
+            var snap = app.getSnapshot();
+            snap.team2 += snap.boardRound;
+            snap.boardRound = 0;
+            app.emitHost({ trigger: 'awardTeam2', snapshot: snap });
+        });
+
+        app.board.find('#newQuestion').on('click', () => {
+            var snap = app.getSnapshot();
+            if (snap.questionIndex >= app.questions.length - 1) return;
+            snap.questionIndex += 1;
+            snap.flipped = Array(app.SLOT_COUNT).fill(false);
+            snap.boardRound = 0;
+            snap.wrong = 0;
+            app.emitHost({ trigger: 'newQuestion', snapshot: snap });
+        });
+
+        app.board.find('#wrong').on('click', () => {
+            var snap = app.getSnapshot();
+            snap.wrong += 1;
+            app.emitHost({ trigger: 'wrong', snapshot: snap });
+        });
+
+        app.socket.on('listening', app.listenSocket);
+    },
 };
+
 app.init();

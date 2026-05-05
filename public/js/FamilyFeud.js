@@ -5,6 +5,7 @@ var app = {
     jsonFile: '/public/data/dawah_family_feud_questions.json',
     currentQ: 0,
     pendingListenPayload: null,
+    wrongFlashHideTimer: null,
 
     SLOT_COUNT: 10,
 
@@ -46,6 +47,9 @@ var app = {
                     <img alt="not on board" src="/public/img/Wrong.svg"/>
                     <img alt="not on board" src="/public/img/Wrong.svg"/>
                 </div>
+                <div class='wrongFlashOverlay' aria-hidden="true">
+                    <img alt="not on board" src="/public/img/Wrong.svg"/>
+                </div>
 
                 <!--- Buttons --->
                 <div class='btnHolder hide' id="host">
@@ -53,6 +57,9 @@ var app = {
                     <div id='awardTeam1'  class='button' data-team='1'>Award Team 1</div>
                     <div id='newQuestion' class='button'>New Question</div>
                     <div id="wrong"       class='button wrongX'>Reset</div>
+                    <div id='wrongFlashBtn' class='button wrongX'>
+                        <img alt="not on board" src="/public/img/Wrong.svg"/>
+                    </div>
                     <div id='awardTeam2'  class='button' data-team='2' >Award Team 2</div>
                 </div>
 
@@ -169,6 +176,16 @@ var app = {
             imgs.eq(k - 1).show();
         }
         wrongEl.toggle(w > 0);
+    },
+
+    showWrongFlash: () => {
+        var overlay = app.board.find('.wrongFlashOverlay');
+        overlay.addClass('is-visible');
+        if (app.wrongFlashHideTimer) clearTimeout(app.wrongFlashHideTimer);
+        app.wrongFlashHideTimer = setTimeout(() => {
+            overlay.removeClass('is-visible');
+            app.wrongFlashHideTimer = null;
+        }, 3000);
     },
 
     prepareCardTransforms: () => {
@@ -366,6 +383,10 @@ var app = {
 
         var animateCards = data.trigger === 'flipCard';
         app.applySnapshot(data.snapshot, { animateCards: animateCards });
+
+        if (data.trigger === 'wrongFlash') {
+            app.showWrongFlash();
+        }
     },
 
     init: () => {
@@ -403,6 +424,14 @@ var app = {
             snap.team2 = 0;
             snap.boardRound = 0;
             app.emitHost({ trigger: 'reset-score', snapshot: snap });
+        });
+
+        app.board.find('#wrongFlashBtn').on('click', () => {
+            if (app.role !== 'host') return;
+            app.emitHost({
+                trigger: 'wrongFlash',
+                snapshot: app.getSnapshot(),
+            });
         });
 
         app.socket.on('listening', app.listenSocket);

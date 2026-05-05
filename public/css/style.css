@@ -266,6 +266,30 @@ body {
   box-sizing: border-box;
   display: inline-block;
 }
+.wrongFlashOverlay {
+  grid-area: main;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 25;
+}
+.wrongFlashOverlay.is-visible {
+  display: flex;
+}
+.wrongFlashOverlay img {
+  height: 100%;
+  width: 25%;
+  padding: 5px;
+  box-sizing: border-box;
+  display: block;
+}
 .showHost #wrong img{
   height: 100%;
   width: 100%;
@@ -274,5 +298,15 @@ body {
   display: inline-block;
 }
 .showHost #wrong {
+width: 75px;
+}
+.showHost #wrongFlashBtn img{
+  height: 100%;
+  width: 100%;
+  padding: 5px;
+  box-sizing: border-box;
+  display: inline-block;
+}
+.showHost #wrongFlashBtn {
 width: 75px;
 }

@@ -18,8 +18,14 @@ var app = {
 
                 <!--- Scores --->
                 <div class='score' id='boardScore'>0</div>
-                <div class='score' id='team1' >0</div>
-                <div class='score' id='team2' >0</div>
+                <div class='score teamScore' id='team1'>
+                    <div class='teamLabel'>Team A</div>
+                    <div class='teamValue'>0</div>
+                </div>
+                <div class='score teamScore' id='team2'>
+                    <div class='teamLabel'>Team B</div>
+                    <div class='teamValue'>0</div>
+                </div>
 
                 <!--- Main Board --->
                 <div id='middleBoard'>
@@ -46,9 +52,7 @@ var app = {
                     <div id='hostBTN'     class='button'>Be the host</div>
                     <div id='awardTeam1'  class='button' data-team='1'>Award Team 1</div>
                     <div id='newQuestion' class='button'>New Question</div>
-                    <div id="wrong"       class='button wrongX'>
-                        <img alt="not on board" src="/public/img/Wrong.svg"/>
-                    </div>
+                    <div id="wrong"       class='button wrongX'>Reset</div>
                     <div id='awardTeam2'  class='button' data-team='2' >Award Team 2</div>
                 </div>
 
@@ -152,8 +156,8 @@ var app = {
 
     syncScoreDOM: () => {
         app.board.find('#boardScore').html(app.boardRoundScore);
-        app.board.find('#team1').html(app.team1Score);
-        app.board.find('#team2').html(app.team2Score);
+        app.board.find('#team1 .teamValue').html(app.team1Score);
+        app.board.find('#team2 .teamValue').html(app.team2Score);
     },
 
     syncWrongVisual: () => {
@@ -395,8 +399,10 @@ var app = {
 
         app.board.find('#wrong').on('click', () => {
             var snap = app.getSnapshot();
-            snap.wrong += 1;
-            app.emitHost({ trigger: 'wrong', snapshot: snap });
+            snap.team1 = 0;
+            snap.team2 = 0;
+            snap.boardRound = 0;
+            app.emitHost({ trigger: 'reset-score', snapshot: snap });
         });
 
         app.socket.on('listening', app.listenSocket);

@@ -72,6 +72,22 @@ body {
   -moz-box-shadow: inset 0 1px 24px 1px rgba(0, 0, 0, 0.48);
   box-shadow: inset 0 1px 24px 1px rgba(0, 0, 0, 0.48);
 }
+.gameBoard .teamScore {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gameBoard .teamLabel {
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.95;
+  line-height: 1;
+}
+.gameBoard .teamValue {
+  font-size: 35px;
+  line-height: 1;
+}
 .gameBoard #boardScore {
   grid-area: scoreM;
 }
